@@ -1,0 +1,1004 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Text;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace MyWinFormsLib
+{
+    /*
+     * INSTALL NOTE:
+     * Before running this library, please install .NET 8.0 on your system.
+     * - For runtime only, install the .NET 8.0 Runtime.
+     * - For development or building, install the .NET 8.0 SDK.
+     * Download from: https://dotnet.microsoft.com/download/dotnet/8.0
+     * Verify by running: dotnet --version  (should show 8.0.x)
+     */
+
+    #region Main Form and Secondary Form
+
+    public class MyForm : Form
+    {
+        private Label titleLabel;
+        private TextBox input;
+        private Button addButton;
+        private ListBox displayList;
+        private Button showSecondary;
+        private ComboBox themeBox;
+        private CheckBox autoAdd;
+        private NumericUpDown rateSelector;
+        private Timer autoTimer;
+        private int added = 0;
+
+        public MyForm()
+        {
+            this.Text = "MyBig WinForms Library";
+            this.ClientSize = new Size(720, 520);
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Font = new Font("Segoe UI", 9);
+
+            titleLabel = new Label { Text = "Enter text and press Add", Location = new Point(12, 12), AutoSize = true };
+            this.Controls.Add(titleLabel);
+
+            input = new TextBox { Location = new Point(12, 40), Width = 450 };
+            this.Controls.Add(input);
+
+            addButton = new Button { Text = "Add", Location = new Point(472, 38), Width = 80 };
+            addButton.Click += AddButton_Click;
+            this.Controls.Add(addButton);
+
+            showSecondary = new Button { Text = "Open Tools", Location = new Point(560, 38), Width = 120 };
+            showSecondary.Click += ShowSecondary_Click;
+            this.Controls.Add(showSecondary);
+
+            displayList = new ListBox { Location = new Point(12, 80), Size = new Size(668, 300) };
+            this.Controls.Add(displayList);
+
+            themeBox = new ComboBox { Location = new Point(12, 390), Width = 180, DropDownStyle = ComboBoxStyle.DropDownList };
+            themeBox.Items.AddRange(new string[] { "Default", "LightBlue", "LightGreen", "LightGray", "Beige" });
+            themeBox.SelectedIndexChanged += ThemeBox_SelectedIndexChanged;
+            themeBox.SelectedIndex = 0;
+            this.Controls.Add(themeBox);
+
+            autoAdd = new CheckBox { Text = "Auto add every N ms", Location = new Point(210, 392), AutoSize = true };
+            autoAdd.CheckedChanged += AutoAdd_CheckedChanged;
+            this.Controls.Add(autoAdd);
+
+            rateSelector = new NumericUpDown { Location = new Point(380, 390), Minimum = 100, Maximum = 10000, Increment = 100, Value = 1000, Width = 100 };
+            this.Controls.Add(rateSelector);
+
+            autoTimer = new Timer { Interval = (int)rateSelector.Value };
+            autoTimer.Tick += AutoTimer_Tick;
+
+            // Add some initial filler items
+            for (int i = 1; i <= 12; i++) displayList.Items.Add($"Initial item {i} - {DateTime.Now:yyyy-MM-dd}");
+
+            this.FormClosing += MyForm_FormClosing;
+        }
+
+        private void AddButton_Click(object sender, EventArgs e)
+        {
+            string v = input.Text?.Trim();
+            if (string.IsNullOrEmpty(v))
+            {
+                MessageBox.Show("Please type something to add.", "Input", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            displayList.Items.Add($"{DateTime.Now:HH:mm:ss} - {v}");
+            input.Clear();
+            added++;
+            titleLabel.Text = $"Added {added} item(s)";
+        }
+
+        private void ShowSecondary_Click(object sender, EventArgs e)
+        {
+            using (var sf = new SecondaryToolsWindow())
+            {
+                sf.SetSourceList(GetListItems());
+                sf.ShowDialog(this);
+            }
+        }
+
+        private List<string> GetListItems()
+        {
+            var outList = new List<string>();
+            foreach (var it in displayList.Items) outList.Add(it.ToString());
+            return outList;
+        }
+
+        private void ThemeBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            string s = themeBox.SelectedItem?.ToString() ?? "Default";
+            switch (s)
+            {
+                case "LightBlue": this.BackColor = Color.LightBlue; break;
+                case "LightGreen": this.BackColor = Color.LightGreen; break;
+                case "LightGray": this.BackColor = Color.LightGray; break;
+                case "Beige": this.BackColor = Color.Beige; break;
+                default: this.BackColor = SystemColors.Control; break;
+            }
+        }
+
+        private void AutoAdd_CheckedChanged(object sender, EventArgs e)
+        {
+            autoTimer.Interval = (int)rateSelector.Value;
+            if (autoAdd.Checked) autoTimer.Start(); else autoTimer.Stop();
+        }
+
+        private void AutoTimer_Tick(object sender, EventArgs e)
+        {
+            displayList.Items.Add($"Auto: {DateTime.Now:HH:mm:ss} - {Guid.NewGuid().ToString().Substring(0, 8)}");
+            if (displayList.Items.Count > 1000) // keep list bounded
+            {
+                displayList.Items.RemoveAt(0);
+            }
+        }
+
+        private void MyForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            // harmless save simulation
+            try
+            {
+                string dump = MegaBulk.GetLargeChecksumSummary();
+                var dlg = new SaveFileDialog { Filter = "Text files|*.txt", FileName = $"dump_{DateTime.Now:yyyyMMdd_HHmmss}.txt" };
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    System.IO.File.WriteAllText(dlg.FileName, dump);
+                }
+            }
+            catch { /* ignore */ }
+        }
+    }
+
+    public class SecondaryToolsWindow : Form
+    {
+        private TextBox previewBox;
+        private Button closeButton;
+        private Button doFakeCalc;
+        private ProgressBar progress;
+        private List<string> sourceList = new List<string>();
+
+        public SecondaryToolsWindow()
+        {
+            this.Text = "Tools";
+            this.Size = new Size(640, 420);
+            this.StartPosition = FormStartPosition.CenterParent;
+
+            previewBox = new TextBox { Multiline = true, ScrollBars = ScrollBars.Vertical, Location = new Point(12, 12), Size = new Size(600, 300) };
+            this.Controls.Add(previewBox);
+
+            doFakeCalc = new Button { Text = "Run Report", Location = new Point(12, 320), Width = 120 };
+            doFakeCalc.Click += DoFakeCalc_Click;
+            this.Controls.Add(doFakeCalc);
+
+            progress = new ProgressBar { Location = new Point(140, 320), Size = new Size(200, 23) };
+            this.Controls.Add(progress);
+
+            closeButton = new Button { Text = "Close", Location = new Point(560, 320), Width = 60 };
+            closeButton.Click += (s, e) => this.Close();
+            this.Controls.Add(closeButton);
+        }
+
+        public void SetSourceList(List<string> list)
+        {
+            sourceList = list ?? new List<string>();
+            previewBox.Text = string.Join(Environment.NewLine, sourceList);
+        }
+
+        private void DoFakeCalc_Click(object sender, EventArgs e)
+        {
+            progress.Value = 0;
+            var report = new StringBuilder();
+            int steps = Math.Max(10, sourceList.Count);
+            for (int i = 0; i < steps; i++)
+            {
+                Thread.Sleep(8); // short fake work
+                report.AppendLine($"Step {i + 1}/{steps}: checksum {MegaBulk.PartialChecksum(i)}");
+                progress.Value = Math.Min(100, (i * 100) / steps);
+                Application.DoEvents();
+            }
+            progress.Value = 100;
+            previewBox.Text = report.ToString();
+        }
+    }
+
+    #endregion
+
+    #region Launcher
+
+    public static class FormLauncher
+    {
+        [STAThread]
+        public static void ShowMyForm()
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new MyForm());
+        }
+    }
+
+    #endregion
+
+    #region Big Fake Bulk Data and Helpers (bloat)
+
+    public static class MegaBulk
+    {
+        private static readonly string[] Seeds = new string[]
+        {
+            "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
+            "golf", "hotel", "india", "juliet", "kilo", "lima",
+            "mike", "november", "oscar", "papa", "quebec", "romeo",
+            "sierra", "tango", "uniform", "victor", "whiskey", "xray",
+            "yankee", "zulu"
+        };
+
+        // Big static bulk text constructed at runtime once
+        public static readonly string HugeText = BuildHugeText(3200);
+
+        private static string BuildHugeText(int repeat)
+        {
+            var sb = new StringBuilder(repeat * 12);
+            var rnd = new Random(12345);
+            for (int i = 0; i < repeat; i++)
+            {
+                sb.Append(Seeds[rnd.Next(Seeds.Length)]);
+                sb.Append('-');
+                sb.Append(i);
+                sb.Append(' ');
+                sb.Append(Guid.NewGuid().ToString());
+                sb.Append(' ');
+                sb.Append(Reverse(Seeds[rnd.Next(Seeds.Length)]));
+                if (i % 6 == 0) sb.AppendLine();
+            }
+            return sb.ToString();
+        }
+
+        public static string GetLargeChecksumSummary()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("MegaBulk Summary");
+            sb.AppendLine("================");
+            sb.AppendLine($"Generated: {DateTime.Now:O}");
+            sb.AppendLine($"Length: {HugeText.Length}");
+            sb.AppendLine($"Checksum: {ComputeChecksum(HugeText)}");
+            sb.AppendLine();
+            sb.AppendLine("Sample:");
+            sb.AppendLine(HugeText.Substring(0, Math.Min(2048, HugeText.Length)));
+            sb.AppendLine();
+            sb.AppendLine("End of summary.");
+            return sb.ToString();
+        }
+
+        public static int ComputeChecksum(string s)
+        {
+            unchecked
+            {
+                int h = 23;
+                foreach (char c in s)
+                {
+                    h = (h * 31) + c;
+                    h ^= (h >> 7);
+                }
+                return h;
+            }
+        }
+
+        public static int PartialChecksum(int seed)
+        {
+            // small deterministic computation used by UI
+            int acc = seed * 17;
+            for (int i = 0; i < 256; i++)
+            {
+                acc ^= (i + seed) * (i % 7 + 1);
+                acc = (acc << 1) | (acc >> 31);
+            }
+            return Math.Abs(acc % 100000);
+        }
+
+        private static string Reverse(string s)
+        {
+            char[] a = s.ToCharArray();
+            Array.Reverse(a);
+            return new string(a);
+        }
+
+        // Several useless helper routines to add more textual/compiled weight
+
+        public static string EncodeToHex(string s)
+        {
+            var sb = new StringBuilder(s.Length * 2);
+            foreach (char c in s)
+            {
+                sb.Append(((int)c).ToString("X2"));
+            }
+            return sb.ToString();
+        }
+
+        public static string RandomAlphaNumeric(int length)
+        {
+            var rnd = new Random(length ^ 0x5A5A5A5A);
+            var sb = new StringBuilder(length);
+            const string chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+            for (int i = 0; i < length; i++) sb.Append(chars[rnd.Next(chars.Length)]);
+            return sb.ToString();
+        }
+
+        public static Dictionary<string, int> BuildIndexMap()
+        {
+            var d = new Dictionary<string, int>();
+            for (int i = 0; i < Seeds.Length; i++) d[Seeds[i]] = i;
+            return d;
+        }
+    }
+
+    #endregion
+
+    #region Extra nested filler classes (for more bulk)
+
+    public class BulkUtilities
+    {
+        public static string MakeParagraph(int sentences)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < sentences; i++)
+            {
+                sb.Append(MegaBulk.SeedsSafeRandomWord(i));
+                sb.Append(" ");
+                sb.Append(MegaBulk.RandomAlphaNumeric(12));
+                sb.Append(". ");
+            }
+            return sb.ToString();
+        }
+    }
+
+    public static class Extensions
+    {
+        public static string Repeat(this string s, int n)
+        {
+            if (n <= 0) return string.Empty;
+            var sb = new StringBuilder(s.Length * n);
+            for (int i = 0; i < n; i++) sb.Append(s);
+            return sb.ToString();
+        }
+    }
+
+    #endregion
+
+    #region Minor safety helpers (avoid trimming by compilers)
+
+    // These methods intentionally reference large members to avoid being optimized away by aggressive linkers.
+    internal static class Keepers
+    {
+        public static string TouchAll()
+        {
+            // Refer to many members so compiler keeps them
+            var sb = new StringBuilder();
+            sb.Append(MegaBulk.HugeText.Length);
+            sb.Append("-");
+            sb.Append(MegaBulk.ComputeChecksum(MegaBulk.HugeText));
+            sb.Append("-");
+            sb.Append(MegaBulk.PartialChecksum(42));
+            sb.Append("-");
+            sb.Append(MegaBulk.EncodeToHex("keep"));
+            sb.Append("-");
+            sb.Append(MegaBulk.RandomAlphaNumeric(16));
+            sb.Append("-");
+            sb.Append(BulkUtilities.MakeParagraph(3));
+            return sb.ToString();
+        }
+    }
+
+    #endregion
+
+    // Add a small API class that consumers might call from other apps
+    public static class PublicApi
+    {
+        /// <summary>
+        /// Return a short summary that an external app can display before launching UI.
+        /// </summary>
+        public static string GetLibrarySummary()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("MyWinFormsLib - Summary");
+            sb.AppendLine("-----------------------");
+            sb.AppendLine("Requires: .NET 8.0 (Runtime or SDK)");
+            sb.AppendLine($"BuiltOn: {DateTime.Now:yyyy-MM-dd}");
+            sb.AppendLine($"HugeTextSamples: {Math.Min(1024, MegaBulk.HugeText.Length)} chars available");
+            sb.AppendLine($"Checksum: {MegaBulk.ComputeChecksum(MegaBulk.HugeText)}");
+            sb.AppendLine("");
+            sb.AppendLine("Call FormLauncher.ShowMyForm() to open the UI.");
+            return sb.ToString();
+        }
+    }
+}
+
+// Add small helper in MegaBulk to expose a seed-safe word generator used above
+namespace MyWinFormsLib
+{
+    internal static partial class MegaBulk
+    {
+        public static string SeedsSafeRandomWord(int seed)
+        {
+            var idx = Math.Abs((seed * 13) % Seeds.Length);
+            return Seeds[idx];
+        }
+    }
+}
+
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Text;
+using System.Windows.Forms;
+
+namespace MyWinFormsLib
+{
+    /*
+     * IMPORTANT:
+     * Before running this library, please install .NET 8.0 on your system.
+     * For runtime only, install .NET 8.0 Runtime.
+     * For development, install .NET 8.0 SDK.
+     * Download from: https://dotnet.microsoft.com/download/dotnet/8.0
+     * Verify installation by running 'dotnet --version' in your console.
+     */
+
+    public class MyForm : Form
+    {
+        private Label headerLabel;
+        private Button actionButton;
+        private TextBox inputBox;
+        private ListBox itemsListBox;
+        private ComboBox colorPicker;
+        private CheckBox timerToggle;
+        private ProgressBar progressBar;
+        private Timer uiTimer;
+        private int actionCounter = 0;
+
+        public MyForm()
+        {
+            // Window setup
+            this.Text = "My Large WinForms DLL Example";
+            this.Size = new Size(600, 500);
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Font = new Font("Segoe UI", 10);
+
+            // Header label
+            headerLabel = new Label
+            {
+                Text = "Enter text below and click 'Add Item'",
+                Location = new Point(20, 20),
+                AutoSize = true
+            };
+            this.Controls.Add(headerLabel);
+
+            // Input TextBox
+            inputBox = new TextBox
+            {
+                Location = new Point(20, 50),
+                Width = 300
+            };
+            this.Controls.Add(inputBox);
+
+            // Action Button
+            actionButton = new Button
+            {
+                Text = "Add Item",
+                Location = new Point(330, 47),
+                Width = 100
+            };
+            actionButton.Click += ActionButton_Click;
+            this.Controls.Add(actionButton);
+
+            // ListBox
+            itemsListBox = new ListBox
+            {
+                Location = new Point(20, 90),
+                Size = new Size(410, 200)
+            };
+            this.Controls.Add(itemsListBox);
+
+            // Color Picker ComboBox
+            colorPicker = new ComboBox
+            {
+                Location = new Point(450, 90),
+                Width = 120,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            colorPicker.Items.AddRange(new string[] { "White", "LightGray", "LightBlue", "LightGreen", "LightYellow", "Pink" });
+            colorPicker.SelectedIndexChanged += ColorPicker_SelectedIndexChanged;
+            colorPicker.SelectedIndex = 0;
+            this.Controls.Add(colorPicker);
+
+            // Timer Toggle CheckBox
+            timerToggle = new CheckBox
+            {
+                Text = "Enable UI Timer",
+                Location = new Point(450, 140),
+                AutoSize = true
+            };
+            timerToggle.CheckedChanged += TimerToggle_CheckedChanged;
+            this.Controls.Add(timerToggle);
+
+            // ProgressBar
+            progressBar = new ProgressBar
+            {
+                Location = new Point(20, 310),
+                Size = new Size(550, 30),
+                Minimum = 0,
+                Maximum = 100,
+                Value = 0
+            };
+            this.Controls.Add(progressBar);
+
+            // UI Timer
+            uiTimer = new Timer
+            {
+                Interval = 100
+            };
+            uiTimer.Tick += UiTimer_Tick;
+        }
+
+        private void ActionButton_Click(object sender, EventArgs e)
+        {
+            string text = inputBox.Text.Trim();
+            if (!string.IsNullOrEmpty(text))
+            {
+                itemsListBox.Items.Add(text);
+                inputBox.Clear();
+                actionCounter++;
+                headerLabel.Text = $"Items added: {actionCounter}";
+            }
+            else
+            {
+                MessageBox.Show("Please enter some text first!", "Input Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ColorPicker_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                string selectedColor = (string)colorPicker.SelectedItem;
+                this.BackColor = Color.FromName(selectedColor);
+            }
+            catch
+            {
+                this.BackColor = SystemColors.Control;
+            }
+        }
+
+        private void TimerToggle_CheckedChanged(object sender, EventArgs e)
+        {
+            if (timerToggle.Checked)
+            {
+                uiTimer.Start();
+                headerLabel.Text = "Timer enabled.";
+            }
+            else
+            {
+                uiTimer.Stop();
+                headerLabel.Text = "Timer disabled.";
+                progressBar.Value = 0;
+            }
+        }
+
+        private void UiTimer_Tick(object sender, EventArgs e)
+        {
+            if (progressBar.Value < progressBar.Maximum)
+            {
+                progressBar.Value += 2;
+                headerLabel.Text = $"Progress: {progressBar.Value}%";
+            }
+            else
+            {
+                progressBar.Value = 0;
+            }
+        }
+    }
+
+    public static class FormLauncher
+    {
+        [STAThread]
+        public static void ShowMyForm()
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new MyForm());
+        }
+    }
+
+    // Large filler with fake methods and dummy data to bulk size
+    public class MegaFiller
+    {
+        private static readonly string[] Words = new string[]
+        {
+            "lorem", "ipsum", "dolor", "sit", "amet", "consectetur",
+            "adipiscing", "elit", "sed", "do", "eiusmod", "tempor",
+            "incididunt", "ut", "labore", "et", "dolore", "magna", "aliqua"
+        };
+
+        public static string GenerateHugeString(int length)
+        {
+            StringBuilder sb = new StringBuilder(length * 10);
+            Random rnd = new Random(42);
+            for (int i = 0; i < length; i++)
+            {
+                sb.Append(Words[rnd.Next(Words.Length)]);
+                sb.Append(" ");
+                sb.Append(Reverse(Words[rnd.Next(Words.Length)]));
+                sb.Append(" ");
+                sb.Append(RandomString(rnd.Next(5, 15), rnd));
+                sb.Append(". ");
+            }
+            return sb.ToString();
+        }
+
+        private static string Reverse(string s)
+        {
+            char[] arr = s.ToCharArray();
+            Array.Reverse(arr);
+            return new string(arr);
+        }
+
+        private static string RandomString(int length, Random rnd)
+        {
+            char[] buffer = new char[length];
+            for (int i = 0; i < length; i++)
+            {
+                buffer[i] = (char)rnd.Next('a', 'z' + 1);
+            }
+            return new string(buffer);
+        }
+
+        public static readonly string BulkData = GenerateHugeString(3500);
+
+        public static int CalculateChecksum()
+        {
+            int sum = 0;
+            foreach (char c in BulkData)
+            {
+                sum += c;
+                sum ^= (sum << 5) | (sum >> 27);
+            }
+            return sum;
+        }
+
+        // Nested dummy classes to add more bloat
+
+        public class NestedFiller
+        {
+            public static string[] GenerateArray(int size)
+            {
+                var arr = new string[size];
+                for (int i = 0; i < size; i++)
+                {
+                    arr[i] = $"Item-{i}-{DateTime.Now.Ticks % 1000}";
+                }
+                return arr;
+            }
+
+            public static void DoNothingLoop()
+            {
+                for (int i = 0; i < 10000; i++)
+                {
+                    int x = i * i;
+                    x = x / (i + 1);
+                }
+            }
+        }
+    }
+}
+
+
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+
+namespace MyWinFormsLib
+{
+    /*
+     * IMPORTANT: Before running this library, please install .NET 8.0 on your system.
+     * For running only, install the .NET 8.0 Runtime; to build or modify, install the .NET 8.0 SDK.
+     * Download installers from: https://dotnet.microsoft.com/download/dotnet/8.0
+     * After installation, verify by running `dotnet --version` in a terminal; it should show version 8.0.x.
+     * Once installed, you can run the application as described.
+     */
+
+    public class MyForm : Form
+    {
+        private Label infoLabel;
+        private Button clickMeButton;
+        private TextBox inputTextBox;
+        private ListBox listBox;
+        private ComboBox comboBox;
+        private CheckBox checkBox;
+        private Timer timer;
+        private int clickCount = 0;
+
+        public MyForm()
+        {
+            this.Text = "My Enhanced WinForms DLL";
+            this.Size = new Size(500, 400);
+            this.StartPosition = FormStartPosition.CenterScreen;
+
+            infoLabel = new Label
+            {
+                Text = "Type something and click the button!",
+                Location = new Point(20, 20),
+                AutoSize = true
+            };
+            this.Controls.Add(infoLabel);
+
+            inputTextBox = new TextBox
+            {
+                Location = new Point(20, 50),
+                Width = 200
+            };
+            this.Controls.Add(inputTextBox);
+
+            clickMeButton = new Button
+            {
+                Text = "Click Me",
+                Location = new Point(230, 47)
+            };
+            clickMeButton.Click += ClickMeButton_Click;
+            this.Controls.Add(clickMeButton);
+
+            listBox = new ListBox
+            {
+                Location = new Point(20, 90),
+                Size = new Size(200, 150)
+            };
+            this.Controls.Add(listBox);
+
+            comboBox = new ComboBox
+            {
+                Location = new Point(250, 90),
+                Width = 200
+            };
+            comboBox.Items.AddRange(new string[] { "Red", "Green", "Blue", "Yellow", "Purple" });
+            comboBox.SelectedIndexChanged += ComboBox_SelectedIndexChanged;
+            this.Controls.Add(comboBox);
+
+            checkBox = new CheckBox
+            {
+                Text = "Enable Timer",
+                Location = new Point(250, 140)
+            };
+            checkBox.CheckedChanged += CheckBox_CheckedChanged;
+            this.Controls.Add(checkBox);
+
+            timer = new Timer
+            {
+                Interval = 1000
+            };
+            timer.Tick += Timer_Tick;
+        }
+
+        private void ClickMeButton_Click(object sender, EventArgs e)
+        {
+            string text = inputTextBox.Text.Trim();
+            if (!string.IsNullOrEmpty(text))
+            {
+                listBox.Items.Add(text);
+                inputTextBox.Clear();
+                clickCount++;
+                infoLabel.Text = $"Button clicked {clickCount} times.";
+            }
+            else
+            {
+                MessageBox.Show("Please enter text before clicking the button.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            string colorName = comboBox.SelectedItem.ToString();
+            try
+            {
+                this.BackColor = Color.FromName(colorName);
+            }
+            catch
+            {
+                this.BackColor = SystemColors.Control;
+            }
+        }
+
+        private void CheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            if (checkBox.Checked)
+            {
+                timer.Start();
+                infoLabel.Text = "Timer enabled!";
+            }
+            else
+            {
+                timer.Stop();
+                infoLabel.Text = "Timer disabled.";
+            }
+        }
+
+        private void Timer_Tick(object sender, EventArgs e)
+        {
+            infoLabel.Text = $"Timer tick: {DateTime.Now:T}";
+        }
+    }
+
+    public static class FormLauncher
+    {
+        [STAThread]
+        public static void ShowMyForm()
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new MyForm());
+        }
+    }
+
+    // --- Filler class to bulk the DLL size (fake code) ---
+    public class BigFillerClass
+    {
+        // This method generates nonsense computations to bulk size
+        public static string GenerateDummyText(int repeatCount)
+        {
+            string baseText = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ";
+            string result = "";
+
+            for (int i = 0; i < repeatCount; i++)
+            {
+                // Fake complex string building logic
+                result += $"{i % 10}-{baseText.Substring(i % 10, 10)}-{DateTime.Now.Ticks % 1000} ";
+                result += ReverseString(baseText);
+                result += GetRandomString(i);
+            }
+
+            return result;
+        }
+
+        private static string ReverseString(string input)
+        {
+            char[] arr = input.ToCharArray();
+            Array.Reverse(arr);
+            return new string(arr);
+        }
+
+        private static string GetRandomString(int seed)
+        {
+            Random rnd = new Random(seed);
+            char[] chars = new char[20];
+            for (int i = 0; i < 20; i++)
+            {
+                chars[i] = (char)rnd.Next('a', 'z');
+            }
+            return new string(chars);
+        }
+
+        // Add a big dummy property that holds a large string
+        public static string BigDummyProperty => GenerateDummyText(150);
+    }
+}
+
+
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+
+namespace MyWinFormsLib
+{
+    public class MyForm : Form
+    {
+        private Label infoLabel;
+        private Button clickMeButton;
+        private TextBox inputTextBox;
+        private ListBox listBox;
+        private ComboBox comboBox;
+        private CheckBox checkBox;
+        private Timer timer;
+        private int clickCount = 0;
+
+        public MyForm()
+        {
+            // Form settings
+            this.Text = "My Enhanced WinForms DLL";
+            this.Size = new Size(500, 400);
+            this.StartPosition = FormStartPosition.CenterScreen;
+
+            // Label
+            infoLabel = new Label();
+            infoLabel.Text = "Type something and click the button!";
+            infoLabel.Location = new Point(20, 20);
+            infoLabel.AutoSize = true;
+            this.Controls.Add(infoLabel);
+
+            // TextBox
+            inputTextBox = new TextBox();
+            inputTextBox.Location = new Point(20, 50);
+            inputTextBox.Width = 200;
+            this.Controls.Add(inputTextBox);
+
+            // Button
+            clickMeButton = new Button();
+            clickMeButton.Text = "Click Me";
+            clickMeButton.Location = new Point(230, 47);
+            clickMeButton.Click += ClickMeButton_Click;
+            this.Controls.Add(clickMeButton);
+
+            // ListBox
+            listBox = new ListBox();
+            listBox.Location = new Point(20, 90);
+            listBox.Size = new Size(200, 150);
+            this.Controls.Add(listBox);
+
+            // ComboBox
+            comboBox = new ComboBox();
+            comboBox.Location = new Point(250, 90);
+            comboBox.Width = 200;
+            comboBox.Items.AddRange(new string[] { "Red", "Green", "Blue", "Yellow", "Purple" });
+            comboBox.SelectedIndexChanged += ComboBox_SelectedIndexChanged;
+            this.Controls.Add(comboBox);
+
+            // CheckBox
+            checkBox = new CheckBox();
+            checkBox.Text = "Enable Timer";
+            checkBox.Location = new Point(250, 140);
+            checkBox.CheckedChanged += CheckBox_CheckedChanged;
+            this.Controls.Add(checkBox);
+
+            // Timer
+            timer = new Timer();
+            timer.Interval = 1000; // 1 second
+            timer.Tick += Timer_Tick;
+        }
+
+        private void ClickMeButton_Click(object sender, EventArgs e)
+        {
+            string text = inputTextBox.Text.Trim();
+            if (!string.IsNullOrEmpty(text))
+            {
+                listBox.Items.Add(text);
+                inputTextBox.Clear();
+                clickCount++;
+                infoLabel.Text = $"Button clicked {clickCount} times.";
+            }
+            else
+            {
+                MessageBox.Show("Please enter text before clicking the button.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            string colorName = comboBox.SelectedItem.ToString();
+            try
+            {
+                this.BackColor = Color.FromName(colorName);
+            }
+            catch
+            {
+                this.BackColor = SystemColors.Control;
+            }
+        }
+
+        private void CheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            if (checkBox.Checked)
+            {
+                timer.Start();
+                infoLabel.Text = "Timer enabled!";
+            }
+            else
+            {
+                timer.Stop();
+                infoLabel.Text = "Timer disabled.";
+            }
+        }
+
+        private void Timer_Tick(object sender, EventArgs e)
+        {
+            infoLabel.Text = $"Timer tick: {DateTime.Now:T}";
+        }
+    }
+}
+
